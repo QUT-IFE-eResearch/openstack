@@ -17,11 +17,12 @@ function Swift(options, cb) {
   opt.tenantId = options.tenantId;
   opt.serviceName = options.serviceName;
   opt.access = {};
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     if (typeof cb === 'function') cb();
   });
 }
+
+function noop(){}
 
 function finish(cb, url) {
   if (typeof cb === 'function') {
@@ -39,8 +40,7 @@ Object.defineProperties(Swift.prototype, {
 
 Swift.prototype.upload = function swiftUpload(options, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var container = options.container ? ('/' + options.container) : '';
     var objectUrl = opt.serviceUrl + container + '/' + options.remote;
     var headers = options.headers || {};
@@ -61,8 +61,7 @@ Swift.prototype.upload = function swiftUpload(options, cb) {
 
 Swift.prototype.download = function swiftDownload(options, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var container = options.container ? ('/' + options.container) : '';
     var objectUrl = opt.serviceUrl + container + '/' + options.remote;
     var headers = options.headers || {};
@@ -72,10 +71,26 @@ Swift.prototype.download = function swiftDownload(options, cb) {
   });
 };
 
+Swift.prototype.getAccountMetadata = function(cb) {
+  var opt = this.opt;
+  swiftEnsureAccess(opt, function(headers, statusCode) {
+    if (headers) {
+      return cb(null, headers, statusCode);
+    } else {
+      var reqOpt = { url:opt.serviceUrl, headers:{'X-Auth-Token':opt.access.token.id} };
+      request.head(reqOpt, function(err, res) {
+        if (typeof cb === 'function') {
+          res = res || {};
+          cb(err, res.headers, res.statusCode);
+        }
+      });
+    }
+  });
+};
+
 Swift.prototype.setAccountMetadata = function(headers, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     headers['X-Auth-Token'] = opt.access.token.id;
     var reqOpt = { url:opt.serviceUrl, headers:headers };
     request.post(reqOpt, finish(cb));
@@ -84,8 +99,7 @@ Swift.prototype.setAccountMetadata = function(headers, cb) {
 
 Swift.prototype.setContainerMetadata = function(container, headers, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var objectUrl = opt.serviceUrl + '/' + container + '/';
     headers['X-Auth-Token'] = opt.access.token.id;
     var reqOpt = { url:objectUrl, headers:headers };
@@ -95,20 +109,15 @@ Swift.prototype.setContainerMetadata = function(container, headers, cb) {
 
 Swift.prototype.getContainerMetadata = function(container, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var objectUrl = opt.serviceUrl + '/' + container + '/';
     var headers = {};
     headers['X-Auth-Token'] = opt.access.token.id;
     var reqOpt = { url:objectUrl, headers:headers };
     request.head(reqOpt, function(err, res){
       if (typeof cb === 'function') {
-        var code, headers;
-        if (res) {
-          code = res.statusCode;
-          headers = res.headers;
-        }
-        cb(err, headers, code);
+        res = res || {};
+        cb(err, res.headers, res.statusCode);
       }
     });
   });
@@ -124,10 +133,37 @@ Swift.prototype.setMetaTempUrl = function(key, cb) {
   this.setAccountMetadata({"X-Account-Meta-Temp-URL-Key":key}, cb); 
 };
 
+Swift.prototype.listContainers = function swiftListContainer(options, cb) {
+  var opt = this.opt;
+  if (typeof cb !== 'function') {
+    if (typeof options === 'function') {
+      cb = options;
+      options = {};
+    } else {
+      cb = noop;
+    }
+  }
+  options.format = options.format || 'json';
+  swiftEnsureAccess(opt, function() {
+    var objectUrl = opt.serviceUrl + '?format=' + options.format;
+    if (options.limit) objectUrl += ('&limit=' + options.limit);
+    if (options.marker) objectUrl += ('&marker=' + options.marker);
+    if (options.end_marker) objectUrl += ('&end_marker=' + options.end_marker);
+    var headers = options.headers || {};
+    headers['X-Auth-Token'] = opt.access.token.id;
+    var reqOpt = { url:objectUrl, headers:headers };
+    request.get(reqOpt, function(err, res, body){
+      res = res || {};
+      var result = body;
+      if (options.format === 'json') result = JSON.parse(body);
+      cb(err, result, res.statusCode);
+    });
+  });
+};
+
 Swift.prototype.createContainer = function swiftCreateContainer(options, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var objectUrl = opt.serviceUrl + '/' + options.container;
     var headers = options.headers || {};
     headers['X-Auth-Token'] = opt.access.token.id;
@@ -138,8 +174,7 @@ Swift.prototype.createContainer = function swiftCreateContainer(options, cb) {
 
 Swift.prototype.removeFile = function(container, file, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var objectUrl = opt.serviceUrl + '/' + container + '/' + file;
     var headers = {};
     headers['X-Auth-Token'] = opt.access.token.id;
@@ -148,10 +183,33 @@ Swift.prototype.removeFile = function(container, file, cb) {
   });
 };
 
+Swift.prototype.removeAllFiles = function(container, cb) {
+  var opt = this.opt;
+  if (typeof cb !== 'function') cb = noop;
+  swiftEnsureAccess(opt, function() {
+    var objectUrl = opt.serviceUrl + '/' + container;
+    var headers = {};
+    headers['X-Auth-Token'] = opt.access.token.id;
+    headers['Content-Type'] = 'text/plain';
+    var reqOpt = { url:objectUrl, headers:headers };
+    request.get(reqOpt, function(err, res, body){
+      if (err) return cb(err);
+      var files = [];
+      if (body) files = body.split('\n');
+      if (res.statusCode < 300) {
+        files.forEach(function(file) {
+          reqOpt.url = objectUrl + '/' + file;
+          request.del(reqOpt, function(err, res, body){});
+        });
+        cb(null);
+      }
+    });
+  });
+};
+
 Swift.prototype.copyFile = function(srcContainer, srcFile, destContainer, destFile, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
+  swiftEnsureAccess(opt, function() {
     var destObjectUrl = opt.serviceUrl + '/' + destContainer + '/' + destFile;
     var headers = {};
     headers['X-Auth-Token'] = opt.access.token.id;
@@ -161,21 +219,34 @@ Swift.prototype.copyFile = function(srcContainer, srcFile, destContainer, destFi
   });
 };
 
-Swift.prototype.listFiles = function(container, cb) {
+Swift.prototype.listFiles = function(container, options, cb) {
   var opt = this.opt;
-  swiftEnsureAccess(opt, function(err) {
-    if (err) throw err;
-    var objectUrl = opt.serviceUrl + '/' + container;
+  if (typeof cb !== 'function') {
+    if (typeof options === 'function') {
+      cb = options;
+      options = {};
+    } else {
+      cb = noop;
+    }
+  }
+  options.format = options.format || 'json';
+  swiftEnsureAccess(opt, function() {
+    var objectUrl = opt.serviceUrl + '/' + container + '?format=' + options.format;
+    if (options.limit) objectUrl += ('&limit=' + options.limit);
+    if (options.marker) objectUrl += ('&marker=' + options.marker);
+    if (options.end_marker) objectUrl += ('&end_marker=' + options.end_marker);
+    if (options.prefix) objectUrl += ('&prefix=' + options.prefix);
+    if (options.delimiter) objectUrl += ('&delimiter=' + options.delimiter);
+    if (options.path) objectUrl += ('&path=' + options.path);
     var headers = {};
     headers['X-Auth-Token'] = opt.access.token.id;
     var reqOpt = { url:objectUrl, headers:headers };
     request.get(reqOpt, function(err, res, body){
-      if (typeof cb === 'function') {
-        var files, code;
-        if (body) files = body.split('\n');
-        if (res) code = res.statusCode;
-        cb(err, files, code);
-      }
+      res = res || {};
+      var result = body;
+      if (options.format === 'json') result = JSON.parse(body);
+      //if (body) files = body.split('\n');
+      cb(err, result, res.statusCode);
     });
   });
 };
@@ -204,24 +275,34 @@ Swift.prototype.createTempUrl = function(options) {
 };
 
 function swiftEnsureAccess(opt, cb) {
-  var tokenValid = false;
   if (opt.access.token) {
+    //Checking the token expiry time has proven unreliable because the storage server is not guaranteed to respect that.
+    //A token can be invalidated at will by the server. Therefore, we always check token validity by a HEAD request for account metadata.
+/* 
+    var tokenValid = false;
     var ed = new Date(opt.access.token.expires);
     ed.setHours(ed.getHours()-2);
     if (ed > new Date()) tokenValid = true;
-  }
-  if (tokenValid) {
-    cb();
+*/
+    var reqOpt = { url:opt.serviceUrl, headers:{'X-Auth-Token':opt.access.token.id} };
+    request.head(reqOpt, function(err, res) {
+      if (err) throw err;
+      if (res.statusCode == 401) getToken();
+      else if (res.statusCode < 300) cb(res.headers, res.statusCode);
+      else throw new Error('Unknown Error when accessing ' + reqOpt.url + ': HTTP' + res.statusCode);
+    });
   } else {
+    getToken();
+  }
+  function getToken() {
     request.post( 
       { url: opt.authUrl + 'tokens',
         headers: {'accept': 'application/json'},
         json: opt.auth 
       }, 
       function(e, r, body) {
-        if (e) {
-          cb(e);
-        } else if (r.statusCode === 200 && body && body.access) {
+        if (e) throw e;
+        if (r.statusCode == 200 && body && body.access) {
           opt.access = body.access;
           var serviceExists = opt.access.serviceCatalog.some(function(cat) {
             if (cat.name === opt.serviceName) {
@@ -241,7 +322,7 @@ function swiftEnsureAccess(opt, cb) {
           if (!serviceExists) throw new Error('Service not found');
           cb();
         } else {
-          cb(new Error('Unknown Error'), r);
+          throw new Error('Unknown Error when getting token: HTTP' + r.statusCode);
         }
       }
     );
